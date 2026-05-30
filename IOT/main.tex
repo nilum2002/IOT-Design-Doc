@@ -6,7 +6,13 @@
 \usepackage{amsmath, amssymb}
 \usepackage{float}
 \usepackage{booktabs}
-\usepackage{hyperref}
+\usepackage[
+    colorlinks=true,
+    linkcolor=black,
+    urlcolor=blue,
+    citecolor=black,
+    hidelinks
+]{hyperref}
 \usepackage{listings}
 \usepackage{xcolor}
 \usepackage{pgfgantt}
@@ -82,8 +88,27 @@
 \maketitle
 
 \newpage
-
+\newpage
+\tableofcontents
+\newpage
 % =========================================================
+\section{Introduction}
+
+Hospitals rely on a continuous and precisely controlled supply of disinfecting chemicals to sterilise medical instruments and maintain clinical hygiene standards. These chemicals arrive in concentrated form and must be diluted to a specific parts-per-million (PPM) concentration before being distributed to dispensing tanks located throughout the hospital premises. Any deviation from the required concentration  whether through over-dilution or under-dosing poses a direct risk to patient safety and instrument sterility.
+
+This report presents the complete design of an Internet of Things (IoT) solution for an Automated Chemical Dosing System deployed in a hospital environment. The system is engineered to satisfy the following core operational requirements:
+
+\begin{itemize}
+    \item Continuous, non-intrusive measurement of the purified water supply tank level using a hydrostatic pressure transducer, without placing any sensor inside the tank to accommodate periodic cleaning protocols.
+    \item Automated, on-demand refilling of up to ten dispensing tanks (750\,mL each) distributed across the hospital premises, served sequentially on a first-come, first-served basis.
+    \item Dual-verification tracking of the concentrated chemical supply level using an external load cell and a computational flow integration model, without any sensor contact with the chemical container.
+    \item Real-time fault detection covering sensor failures, pipeline leaks, stuck-open valves, and dry-running supply tanks, with audible and visual alarms.
+    \item A distributed controller network using a wired Controller Area Network (CAN Bus) backbone connecting one master ESP32 node and ten slave ESP32 nodes, with a Wi-Fi cloud uplink for periodic reporting.
+    \item Periodic cloud-based reporting covering chemical consumption by tank location, daily usage totals, and refill frequency statistics.
+\end{itemize}
+
+The report is structured as follows. Section~2 presents the water level measurement methodology and the hydrostatic pressure sensing routine. Section~3 covers the concentrated chemical level estimation framework. Section~4 provides a comparative hardware market analysis for all selected components. Section~5 documents component failure modes and automated fail-safe strategies. Section~6 describes the distributed network communication protocol. Sections~7 and~8 present the system architecture and block diagram respectively. Section~9 details the operational algorithms for each IoT component. Section~10 documents the Wokwi simulation with the complete firmware. Section~11 presents the physical schematic diagram.
+\end{itemize}
 \section{Water Level Measurement Method }
 
 Since the hospital prefers not to install any sensors inside the tank due to the periodic cleaning process, the possible way to install sensors is either on the top lid of the tank or externally at the discharge outlet point.
@@ -105,117 +130,79 @@ Height & 10.16 m \\
 \end{table}
 
 % =========================================================
-\subsection{Method : Inferential Software Flow Integration Routine}
+\subsection{Method : Hydrostatic Pressure Level Sensing Routine}
 
-To satisfy the hospital's strict guidelines preventing any physical instrumentation from entering the 2000-liter purified water supply tank, a real-time Inferential Software Flow Integration Routine is deployed within the central controller.
+To satisfy the hospital's strict guidelines preventing any physical instrumentation from entering the 2000-liter purified water supply tank, a real-time Hydrostatic Pressure Level Sensing Routine is deployed within the central controller.
 
-This model tracks the exact volume of water entering and leaving the vessel by intercepting high-frequency square-wave pulse signals from two inline \href{https://www.duino.lk/product/ht30-water-flow-sensor-ac/}{SEN-HZ21WA miniature nylon Hall Effect turbine flow sensors} installed completely external to the tank housing.
-\\ This product costs approximately \textbf{LKR 3000}.
+This model determines the continuous liquid height and net volume inside the vessel by intercepting analog voltage telemetry from a single industrial, thread-mounted pressure transducer installed completely external to the tank housing along the lowest point of the primary discharge manifold.
 
+\subsubsection*{Structural Pressure Validation}
 
-\subsubsection*{Hardware Specifications}
+Before sensor selection, the maximum hydrostatic gauge pressure exerted at the base of the fully-filled tank must be established to confirm that the chosen transducer's rated range safely encompasses the worst-case operating condition.
 
-\begin{table}[H]
-\centering
-\begin{tabular}{|p{5cm}|p{9cm}|}
-\hline
-\textbf{Hardware Parameter} & \textbf{Specification Value} \\
-\hline
-Model Number & SEN-HZ21WA Miniature Water Sensor \\
-\hline
-Material Construction & Nylon PA66 Polymer with Stainless Steel Impeller Shaft \\
-\hline
-Connection Profile & $1/2$ inch G-Thread / DN15 \\
-\hline
-Operational Flow Range & $1.0$ to $30.0$ L/min \\
-\hline
-Excitation Voltage Input & 5V DC \\
-\hline
-Sensor Mechanics & Magnetic impeller with isolated Hall Effect sensor \\
-\hline
-Signal Output Type & 5V square-wave digital pulse train \\
-\hline
-\end{tabular}
-\caption{Flow Sensor Specifications}
-\end{table}
-
-Every $\Delta t = 1.0$ second, the controller samples the background registers and calculates the discrete fluid parameters.
-
-The current net volume of water inside the tank is updated using the following discrete Riemann summation framework.
+Given the tank height of $H_{\text{max}} = 10.16\text{ m}$ and the standard volumetric density of purified water $\rho = 1000\text{ kg/m}^3$:
 
 \[
-V_{\text{current(new)}} =
-V_{\text{current(old)}} + \Delta V_{\text{net}}
+P_{\text{max}} = \rho \times g \times H_{\text{max}}
 \]
 
 \[
-\Delta V_{\text{net}} =
-(Q_{\text{in}} - Q_{\text{out}})\times \Delta t
-\]
-
-The instantaneous flow velocity parameters are derived in liters per minute.
-
-\[
-Q_{\text{in}} =
-\left(
-\frac{\text{Inflow Pulse Count}}
-{\text{K-Factor}}
-\right)\times 60
+P_{\text{max}} = 1000 \times 9.81 \times 10.16
 \]
 
 \[
-Q_{\text{out}} =
-\left(
-\frac{\text{Outflow Pulse Count}}
-{\text{K-Factor}}
-\right)\times 60
+P_{\text{max}} = 99{,}669.6 \text{ Pa} \approx \mathbf{0.0997 \text{ MPa}} \approx \mathbf{0.096 \text{ MPa}}
 \]
 
-The incremental volumetric deviation becomes:
+This confirms that the selected 0--10\,MPa pressure transducer operates at less than $\mathbf{1\%}$ of its rated full-scale capacity under maximum load, providing an extremely generous safety margin and high effective resolution within the active measurement window.
+
+\subsubsection*{Voltage-to-Pressure Conversion}
+
+Every $\Delta t = 1.0$ second, the controller samples the ADC channel connected to the transducer. The raw analog output voltage ($V_{\text{out}}$) is linearised across the calibrated $0.5\text{ V}$ to $4.5\text{ V}$ range to recover the instantaneous gauge pressure:
 
 \[
-\Delta V_{\text{net}} =
-\frac{\text{Inflow Pulses} - \text{Outflow Pulses}}
-{450}
+P = \left( \frac{V_{\text{out}} - 0.5}{4.5 - 0.5} \right) \times 10{,}000{,}000
+\quad \text{(Pascals)}
 \]
 
-This value is continuously added to the global storage variable to track active storage levels.
+\subsubsection*{Computing Linear Height from Pressure}
 
-\subsubsection*{Converting Net Volume to Linear Height}
-
-To drive the continuous digital readout gauge on the dashboard, the controller converts the running volume variable into a linear height profile.
-
-Given the cylindrical geometric properties of the 2000L tank:
+By inverting the hydrostatic equilibrium, the controller derives the instantaneous linear height profile ($H$) of the water column directly from the recovered pressure value:
 
 \[
-r = 0.25m
+P = \rho \times g \times H
+\quad \Rightarrow \quad
+H = \frac{P}{\rho \times g} = \frac{P}{1000 \times 9.81}
+\quad \text{(meters)}
 \]
 
-\[
-A = \pi r^2
-\]
+\subsubsection*{Converting Linear Height to Net Fluid Volume}
+
+To populate the continuous digital readout gauge on the operational dashboard, the controller converts the computed height into a running volume variable using the constant cross-sectional area of the cylindrical tank:
 
 \[
-A = \pi(0.25)^2 \approx 0.19635m^2
-\]
-
-The real-time height profile is calculated as:
-
-\[
-V_{m^3} =
-\frac{V_{\text{current}}}{1000}
+r = 0.25\text{ m}, \qquad A = \pi r^2 = \pi(0.25)^2 \approx 0.19635\text{ m}^2
 \]
 
 \[
-H =
-\frac{V_{m^3}}{A}
+V_{\text{m}^3} = H \times A
 \]
 
-This dynamic variable continuously updates the HMI graphical dashboard, allowing hospital maintenance crews to clean and manually scrub the internal tank structure without risking physical damage to instrumentation.
+\[
+V_{\text{current}} = V_{\text{m}^3} \times 1000
+\quad \text{(Liters)}
+\]
 
+This dynamic tracking variable continuously updates the HMI graphical dashboard, providing smooth, non-accumulating inventory tracking while allowing hospital maintenance crews to clean and manually scrub the internal tank structure without risking physical damage or fluid short-circuits to any internal instrumentation.
+
+\subsubsection*{Leak Detection via Auxiliary Flow Meters}
+
+In addition to the primary pressure transducer, two inline \href{https://www.duino.lk/product/ht30-water-flow-sensor-ac/}{SEN-HZ21WA Hall Effect turbine flow sensors} are retained on the outlet pipes of the tank exclusively for anomaly detection. Under normal operation, any discrepancy between the volumetric balance computed from the flow meters and the independently measured pressure-derived volume indicates an unaccounted fluid loss event.
 % =========================================================
 \section{Concentrated Chemical Level Estimation Method}
+
 To adhere to the strict constraint preventing the installation of level sensors inside the 10-liter concentrated chemical container, a highly reliable, non-intrusive Dual-Verification Framework is deployed.
+
 % =========================================================
 \subsection{Method: Dual-Verification (Mass-Computational) Level Tracking for Concentrated Chemical Estimation}
 
@@ -224,61 +211,45 @@ The system is configured around a standard 10-liter cylindrical or rectangular c
 \subsubsection*{Chemical Properties and Container Specifications}
 
 \begin{itemize}
-    \item \textbf{Fluid Density ($\rho_{\text{chem}}$):}  
-    At room temperature ($27^\circ C$ - $32^\circ C$), the density of Isopropyl Alcohol is:
-    
+    \item \textbf{Fluid Density ($\rho_{\text{chem}}$):}
+    At typical temperature in Sri Lanka ($27^\circ$C -- $32^\circ$C), the density of Isopropyl Alcohol is:
     \[
     \rho_{\text{chem}} = 785 \text{ kg/m}^3
     \]
-
     which is equivalent to:
-
     \[
     0.785 \text{ g/mL} = 0.785 \text{ kg/L}
     \]
 
     \item \textbf{Maximum Fluid Mass:}
-
     A completely full 10-liter chemical payload exerts a net liquid mass of:
-
     \[
-    M_{\text{fluid}}
-    =
-    \text{Volume} \times \rho_{\text{chem}}
+    M_{\text{fluid}} = \text{Volume} \times \rho_{\text{chem}}
+    \]
+    \[
+    M_{\text{fluid}} = 10\text{ L} \times 0.785\text{ kg/L} = 7.85\text{ kg}
     \]
 
-    \[
-    M_{\text{fluid}}
-    =
-    10\text{ L} \times 0.785\text{ kg/L}
-    =
-    7.85\text{ kg}
-    \]
-
-    \item \textbf{Container Tare Weight:}
-
-    The empty plastic chemical canister exhibits a static dead weight:
-
+    \item \textbf{Container Weight:}
+    Assume the empty plastic chemical container exhibits a static dead weight:
     \[
     M_{\text{tare}} \approx 0.35\text{ kg} - 0.50\text{ kg}
     \]
-
 \end{itemize}
 
 % =========================================================
 \subsubsection*{1. Primary Physical Verification: External Load Cell Matrix}
 
-An industrial strain-gauge load cell platform is installed directly beneath the canister assembly, isolating the electrical components entirely from chemical contact.
+An industrial strain-gauge load cell platform is installed directly beneath the container assembly, isolating the electrical components entirely from chemical contact.
 
 When a fresh container is positioned on the platform, the system filters out the weight of the platform frame and the container's dry plastic shell ($M_{\text{tare}}$).
 
 The controller samples the raw live gross weight ($M_{\text{current}}$) and computes the true remaining physical volume ($V_{\text{mass}}$) via mass balance:
 
 \[
-V_{\text{mass}} (\text{Liters})
+V_{\text{mass}} \text{ (Liters)}
 =
-\frac{M_{\text{current}} - M_{\text{tare}}}
-{\rho_{\text{chem}}}
+\frac{M_{\text{current}} - M_{\text{tare}}}{\rho_{\text{chem}}}
 \]
 
 Because the fluid density is significantly lighter than water, this equation prevents a $21.5\%$ overestimation error that would occur if water-density constants were mistakenly applied to the software logic.
@@ -288,14 +259,10 @@ Because the fluid density is significantly lighter than water, this equation pre
 
 Operating in parallel with the weight sensor, an inferential software loop serves as a digital twin redundancy check.
 
-As the chemical dosing pump draws fluid from the container, it passes through an inline micro-flow meter.
-
-Because microcontrollers execute code within sequential loops at finite clock edges, the theoretical continuous integral for fluid displacement is represented as:
+As the chemical dosing pump draws fluid from the container, it passes through an inline micro-flow meter. Because microcontrollers execute code within sequential loops at finite clock edges, the theoretical continuous integral for fluid displacement is represented as:
 
 \[
-V_{\text{dispensed}}
-=
-\int_{0}^{t} Q_{\text{chem}}(t)\,dt
+V_{\text{dispensed}} = \int_{0}^{t} Q_{\text{chem}}(t)\,dt
 \]
 
 \[
@@ -305,30 +272,28 @@ V_{\text{dispensed}}
 The running algorithmic volume register updates dynamically every clock cycle:
 
 \[
-V_{\text{algorithm(new)}}
-=
-V_{\text{algorithm(old)}} - \Delta V
+V_{\text{algorithm(new)}} = V_{\text{algorithm(old)}} - \Delta V
 \]
 
 \[
-\Delta V
-=
-Q_{\text{chem}} \times \Delta t
+\Delta V = Q_{\text{chem}} \times \Delta t
 \]
 
 Where:
-
 \begin{itemize}
-    \item $Q_{\text{chem}}$ = Real-time volumetric flow rate extracted from the pulse frequency of the micro-flow meter ($\text{Liters/Second}$)
-
-    \item $\Delta V$ = Absolute incremental volume drawn during the 1-second clock step ($\text{Liters}$)
+    \item $Q_{\text{chem}}$ = Real-time volumetric flow rate extracted from the pulse frequency of the micro-flow meter ($\text{Liters/Second}$).
+    \item $\Delta V$ = Absolute incremental volume drawn during the 1-second clock step ($\text{Liters}$).
 \end{itemize}
 
+% =========================================================
+\subsubsection*{Leak Detection Framework}
+
+The two verification channels , the physical load cell and the computational flow integration model, operate simultaneously and independently. Under normal dosing operation, both channels should agree within a configurable tolerance window. Any sustained divergence between the two measurements indicates an unaccounted fluid loss event in the chemical supply line.
 % =========================================================
 \newpage
 \section{Hardware Specifications and Comparative Market Analysis}
 
-This section presents a systematic evaluation of all hardware components required for the automated chemical dosing system. For each subsystem, three commercially available product options sourced from the Sri Lankan market and Foreign market are compared across cost, specifications, and suitability for the application. The recommended product for each category is highlighted in \colorbox{chosen}{green}.
+This section presents a systematic evaluation of all hardware components required for the automated chemical dosing system. For each subsystem, three commercially available product options sourced from the Sri Lankan and foreign market are compared across cost, specifications, and suitability for the application. The recommended product for each category is highlighted in \colorbox{chosen}{green}.
 
 % ---------------------------------------------------------
 \subsection{Water Level Measurement - Inferential Flow Sensors}
@@ -364,18 +329,63 @@ $\sim$LKR 900 &
 1--30 L/min, 5V DC, lower-cost plastic body &
 \badgeamber{Budget alt.} \\
 \hline
-HT30 (AC-rated variant) &
-\href{https://www.duino.lk/product/ht30-water-flow-sensor-ac/}{duino.lk} &
-$\sim$LKR 3,000 &
-Same model as chosen option; identical specifications &
-\badgeblue{Duplicate} \\
+YF-S201C Hall Effect Liquid Water Flow Sensor&
+\href{https://www.duino.lk/product/yf-s201c-g1-2-hall-effect-liquid-water-flow-sensor/}{duino.lk} &
+$\sim$LKR 1,700 &
+flow range 1-30 L/min, 5V DC, plastic body &
+\badgeamber{Budget alt.} \\
 \hline
 \end{tabular}
 \caption{Water Flow Sensor Comparison (Inferential Level Method)}
 \end{table}
 
-\noindent\textbf{Justification:} The SEN-HZ21WA is selected for its stainless steel impeller shaft, which provides superior corrosion resistance compared to fully plastic alternatives. At LKR 3,000 per unit, it is significantly cheaper than the commented-out ultrasonic option (LKR 65,500) and the industrial load cell option (LKR 17,479), while fully meeting the no-sensor-inside-tank constraint.
+\noindent\textbf{Justification:} The SEN-HZ21WA is selected for its stainless steel impeller shaft, which provides superior corrosion resistance and long-term durability compared to fully plastic-bodied alternatives - an important consideration given that these sensors remain permanently installed on live water pipes in a hospital environment. For the leak detection role, pulse-counting accuracy and material integrity are the primary selection criteria rather than absolute flow precision, since the sensors are used to compute a running volumetric balance that is continuously compared against the independent pressure-derived measurement. The SEN-HZ21WA's 450 pulses-per-liter K-factor provides sufficient resolution to detect the small incremental flow discrepancies that would indicate an early-stage pipeline leak. The budget G\textonehalf{} Hall sensor, while significantly cheaper at LKR 900, uses a fully plastic body and impeller assembly that is susceptible to accelerated wear and seal degradation under continuous flow cycling, making it unsuitable for unattended long-term deployment in a critical hospital infrastructure context.
 
+% ---------------------------------------------------------
+\subsection{Water Level Measurement - Hydrostatic Pressure Transducer}
+
+The hydrostatic pressure level sensing routine requires a single industrial, thread-mounted pressure transducer installed externally at the lowest point of the primary discharge manifold of the 2000-liter water supply tank. This approach eliminates any physical instrumentation inside the tank, fully satisfying the hospital's strict cleaning protocol constraint. The maximum hydrostatic pressure at full tank ($H = 10.16\text{ m}$) is $\approx 0.096\text{ MPa}$, which must be within the selected sensor's rated range.
+
+\vspace{0.3cm}
+\noindent\textbf{Comparative Analysis:}
+
+\begin{table}[H]
+\centering
+\setlength{\tabcolsep}{5pt}
+\renewcommand{\arraystretch}{1.4}
+\begin{tabular}{|p{3.2cm}|p{3.5cm}|p{2.2cm}|p{3.5cm}|p{2cm}|}
+\hline
+\rowcolor{headerblue}
+\textcolor{white}{\textbf{Product}} &
+\textcolor{white}{\textbf{Supplier}} &
+\textcolor{white}{\textbf{Est. Cost}} &
+\textcolor{white}{\textbf{Key Specifications}} &
+\textcolor{white}{\textbf{Verdict}} \\
+\hline
+\rowcolor{chosen}
+0--0.5\,MPa Pressure Sensor G1/4 DC\,5V &
+\href{https://www.duino.lk/product/0-5mpa-pressure-sensor/}{duino.lk} &
+$\sim$LKR 6,990 &
+0--5\,MPa range, G1/4 thread, 0.5--4.5\,V analog output, 5V DC, $\pm$1.0\% FS accuracy, water/oil/gas compatible &
+\badgegreen{Chosen} \\
+\hline
+0--10\,MPa Pressure Sensor G1/4 DC\,5V &
+\href{https://www.duino.lk/product/0-10mpa-pressure-sensor-dc5v/}{duino.lk} &
+$\sim$LKR 9,850 &
+0--10\,MPa range, G1/4 thread, 0.5--4.5\,V analog output, 5V DC, $\pm$2.0\% FS accuracy, water/oil/gas compatible &
+\badgeamber{Over-range} \\
+\hline
+G1/4 DC\,5V 0--1.2\,MPa Pressure Transducer &
+\href{https://www.aliexpress.com/item/1005007233513998.html}{AliExpress} &
+$\sim$LKR 11,500 &
+0--1.2\,MPa, G1/4 thread, 0.5--4.5\,V output, carbon steel body, $\pm$1.5\% FS, $\leq$2\,ms response, 5V DC &
+\badgeamber{High price} \\
+\hline
+\end{tabular}
+\caption{Hydrostatic Pressure Transducer Comparison (Water Level Measurement)}
+\end{table}
+
+\noindent\textbf{Justification:} The 0--0.5\,MPa sensor from duino.lk is selected as the optimal choice. Given the maximum operating pressure of $\approx 0.096\text{ MPa}$ at full tank, this sensor operates at only $\mathbf{1.92\%}$ of its rated full-scale range, providing an excellent safety margin while maintaining a meaningful resolution window. The $\pm$1.0\% FS accuracy is tighter than the 0--10\,MPa alternative ($\pm$2.0\% FS), which also operates at less than 1\% of its range - unnecessarily compressing the effective measurement resolution for this application. The AliExpress 0--1.2\,MPa transducer, while significantly not cheaper than others, operates at $\mathbf{8\%}$ of its rated range at full tank and uses a carbon steel body which presents long-term corrosion risk in a purified water environment. Its lower unit cost does not justify the reduced build quality and chemical compatibility risk in a critical hospital infrastructure application.
 % ---------------------------------------------------------
 \subsection{Chemical Level Estimation - Load Cell}
 
@@ -399,20 +409,20 @@ The dual-verification framework uses a strain-gauge load cell platform mounted b
 \hline
 CZL-601 60 kg S-type load cell &
 \href{https://tronic.lk/product/czl-601-load-cell-60kg-130x30x22mm}{tronic.lk} &
-$\sim$LKR 2,500 &
+$\sim$LKR 3,650 &
 60 kg capacity, S-type aluminium, HX711 compatible &
 \badgegreen{Suitable} \\
 \hline
 20 kg load cell &
 \href{https://www.duino.lk/product/20kg-load-cell-weighing-sensor/}{duino.lk} &
-$\sim$LKR 1,200 &
-20 kg max marginal for 8.35 kg payload; minimal overload margin &
-\badgered{Risky} \\
+$\sim$LKR 440 &
+20 kg max — marginal for 8.35 kg payload; minimal overload margin &
+\badgered{$\triangle$ Risky} \\
 \hline
 \rowcolor{chosen}
 50 kg body load cell &
 \href{https://www.duino.lk/product/50kg-body-load-cell/}{duino.lk} &
-$\sim$LKR 1,800 &
+$\sim$LKR 260 &
 50 kg max, ample overload headroom, HX711 compatible &
 \badgegreen{Best fit} \\
 \hline
@@ -425,8 +435,8 @@ $\sim$LKR 1,800 &
 % ---------------------------------------------------------
 \subsection{Dispensing Tank Level Sensors}
 
-Each 750 mL dispensing tank requires a single low-level binary sensor to detect when the chemical level falls below the refill threshold. The sensor is fitted externally to avoid chemical contact, and only on/off detection is required — continuous level measurement is not needed for this subsystem.
-
+Each 750 mL dispensing tank requires a single low-level binary sensor to detect when the chemical level falls below the refill threshold. The sensor is fitted externally to avoid chemical contact, and only on/off detection is required - continuous level measurement is not needed for this subsystem.
+\newpage
 \vspace{0.3cm}
 \noindent\textbf{Comparative Analysis:}
 
@@ -446,21 +456,21 @@ Each 750 mL dispensing tank requires a single low-level binary sensor to detect 
 \rowcolor{chosen}
 JSN-SR04T waterproof ultrasonic sensor &
 \href{https://lk-tronics.com/product/jsn-sr04-waterproof-ultrasonic-distance-measuring-transducer-sensors/}{lk-tronics.com} &
-$\sim$LKR 950 &
+$\sim$LKR 1,690 &
 IP67 rated, 20--450 cm range, chemical-splash resistant, sealed probe &
-\badgegreen{BestFit} \\
+\badgegreen{Rec.} \\
 \hline
 HC-SR04 standard ultrasonic &
 \href{https://tronic.lk/product/hc-sr04-4pin-ultrasonic-sensor-module}{tronic.lk} &
-$\sim$LKR 350 &
+$\sim$LKR 300 &
 2--400 cm range, NOT waterproof, exposed PCB — chemical exposure risk &
-\badgered{Not Suitable} \\
+\badgered{Risky} \\
 \hline
 DFRobot gravity liquid sensor &
 \href{https://www.dfrobot.com/product-2059.html}{dfrobot.com} &
-$\sim$LKR 58, 000 &
+$\sim$LKR 2,800 &
 Non-contact through-wall capacitive detection, corrosion-proof, fully sealed &
-\badgeblue{Budget alt.} \\
+\badgeblue{Alt.} \\
 \hline
 \end{tabular}
 \caption{Dispensing Tank Level Sensor Comparison}
@@ -469,6 +479,7 @@ Non-contact through-wall capacitive detection, corrosion-proof, fully sealed &
 \noindent\textbf{Justification:} The JSN-SR04T is the optimal choice. Its IP67 waterproof rating protects against chemical splashes in the dispensing environment, unlike the bare HC-SR04. The DFRobot capacitive sensor offers superior non-contact through-wall sensing and is the preferred option if the dispensing tanks are sealed plastic containers, at a higher cost premium.
 
 % ---------------------------------------------------------
+\newpage
 \subsection{Flow Meters - Chemical Dosing Line}
 
 The chemical dosing pump flow rate is controlled via a PWM signal but does not guarantee accurate flow. An inline flow meter on the chemical line measures the actual dispensed volume in real time, forming the secondary verification channel of the dual-verification framework.
@@ -491,20 +502,20 @@ The chemical dosing pump flow rate is controlled via a PWM signal but does not g
 \hline
 YF-S201 Hall effect flow sensor &
 \href{https://lk-tronics.com/product/yf-s201-water-flow-sensor/}{lk-tronics.com} &
-$\sim$LKR 650 &
+$\sim$LKR 900 &
 1--30 L/min, 5V, Hall pulse output, ABS plastic body &
-\badgeamber{Check IPA compat.} \\
+\badgeamber{Corrosion .} \\
 \hline
 Magnetic plastic flow sensor &
 \href{https://www.duino.lk/product/magnetic-plastic-water-flow-sensor/}{duino.lk} &
-$\sim$LKR 600 &
+$\sim$LKR 1500 &
 Low flow range, food-grade plastic body &
-\badgeamber{Verify compat.} \\
+\badgeamber{alt.} \\
 \hline
 \rowcolor{chosen}
 YF-S201C G\textonehalf{} Hall effect sensor &
 \href{https://www.duino.lk/product/yf-s201c-g1-2-hall-effect-liquid-water-flow-sensor/}{duino.lk} &
-$\sim$LKR 700 &
+$\sim$LKR 1,600 &
 G\textonehalf{} thread fitting, Hall pulse output, slightly more robust pipe connection &
 \badgegreen{Good fit} \\
 \hline
@@ -536,23 +547,23 @@ Each dispensing tank requires a solenoid-controlled valve to regulate chemical i
 \textcolor{white}{\textbf{Verdict}} \\
 \hline
 Tuya Zigbee smart gas valve &
-\href{https://www.daraz.lk}{daraz.lk} &
-$\sim$LKR 7,769 &
+\href{https://www.daraz.lk/products/tuya-zigbee-water-valve-gas-shutoff-controller-support-alexa-google-assistant-smart-wireless-control-smart-life-app-i493480840.html}{daraz.lk} &
+$\sim$LKR 9,000 &
 Zigbee wireless, smart-home integration, timer function, \textonehalf--1 inch &
-\badgered{Overkill / costly} \\
+\badgered{Overkill.} \\
 \hline
 \rowcolor{chosen}
 FPD270A \textonehalf{} inch solenoid valve (220V) &
 \href{https://www.duino.lk/product/fpd270a-1-2-220v-electric-solenoid-valve/}{duino.lk} &
-$\sim$LKR 900 &
+$\sim$LKR 1,200 &
 220V AC, \textonehalf{} inch, normally closed, direct relay control from MCU &
 \badgegreen{Best value} \\
 \hline
-4\,mm pneumatic flow control valve &
-\href{https://www.duino.lk/product/4mm-pneumatic-air-flow-control-valve/}{duino.lk} &
-$\sim$LKR 300 &
-Pneumatic, 4\,mm tube fitting — designed for air/gas, not liquid pipelines &
-\badgered{Wrong type} \\
+Fully Automatic Water Level Control Plastic Float Valve &
+\href{https://www.daraz.lk/products/12-inch-1-inch-automatic-water-level-control-float-valve-water-tank-auto-shut-off-valve-12-i570586758-s2643141068.html?c=&channelLpJumpArgs=&clickTrackInfo=query%253Aautomatic%252Bvalve%253Bnid%253A570586758%253Bsrc%253ALazadaMainSrp%253Brn%253A7eee135c998f33f3c97a98c03d1b1300%253Bregion%253Alk%253Bsku%253A570586758_LK%253Bprice%253A1890%253Bclient%253Adesktop%253Bsupplier_id%253A1000244832211%253Bsession_id%253A%253Bbiz_source%253Ah5_external%253Bslot%253A0%253Butlog_bucket_id%253A470687%253Basc_category_id%253A10000448%253Bitem_id%253A570586758%253Bsku_id%253A2643141068%253Bshop_id%253A295626%253BtemplateInfo%253A&freeshipping=0&fs_ab=1&fuse_fs=&lang=en&location=Sabaragamuwa&price=1.89E%203&priceCompare=skuId%3A2643141068%3Bsource%3Alazada-search-voucher%3Bsn%3A7eee135c998f33f3c97a98c03d1b1300%3BoriginPrice%3A189000%3BdisplayPrice%3A189000%3BsinglePromotionId%3A-1%3BsingleToolCode%3AmockedSalePrice%3BvoucherPricePlugin%3A0%3Btimestamp%3A1780066909226&ratingscore=4.909090909090909&request_id=7eee135c998f33f3c97a98c03d1b1300&review=11&sale=72&search=1&source=search&spm=a2a0e.searchlist.list.0&stock=1}{Daraz.lk} &
+$\sim$LKR 1,890 &
+A 220V AC, ½-inch normally closed automatic float valve with PA66 nylon and 304 stainless steel construction, supporting 0.1–12 kg pressure range and direct MCU relay control &
+\badgeamber{Alt.}\\
 \hline
 \end{tabular}
 \caption{Control Valve Comparison (Dispensing Tank Inlets)}
@@ -561,6 +572,7 @@ Pneumatic, 4\,mm tube fitting — designed for air/gas, not liquid pipelines &
 \noindent\textbf{Justification:} With potentially tens of dispensing tanks, the FPD270A at LKR 900 per valve is the clear choice. It is driven through a relay module directly from the MCU, requires no wireless protocol stack, and is purpose-built for liquid pipelines. The Tuya Zigbee valve is designed for smart-home irrigation and gas shutoff applications and would add unnecessary cost and protocol complexity to the IoT architecture.
 
 % ---------------------------------------------------------
+\newpage
 \subsection{Variable Rate Pump - Chemical Dosing}
 
 The chemical dosing pump must deliver IPA at a controllable flow rate via PWM, with the actual flow measured by the inline flow meter. Since IPA is a chemical solvent, fluid compatibility with the pump internals is the primary selection criterion.
@@ -581,31 +593,180 @@ The chemical dosing pump must deliver IPA at a controllable flow rate via PWM, w
 \textcolor{white}{\textbf{Key Specifications}} &
 \textcolor{white}{\textbf{Verdict}} \\
 \hline
-100\,W submersible water pump &
-\href{https://www.duino.lk/product/100w-submersible-water-pump-4-5m/}{duino.lk} &
-$\sim$LKR 3,500 &
-PWM-controllable, 4.5\,m head — designed for water, chemical compatibility unverified &
-\badgered{$\triangle$ Compat. risk} \\
-\hline
 \rowcolor{chosen}
-Peristaltic liquid dosing pump &
-\href{https://www.duino.lk/product/peristaltic-liquid-pump-dosing-pump/}{duino.lk} &
-$\sim$LKR 2,800 &
-Fluid isolated inside silicone/rubber tube; pump body never contacts IPA; PWM speed control &
-\badgegreen{Best for chemicals} \\
+8W 12V peristaltic pump &
+\href{https://www.daraz.lk/products/8w-12v-peristaltic-pump-can-change-the-direction-of-water-flow-in-and-out-with-photoelectric-encoder-for-sweeping-robot-i577154781-s2688515323.html?c=&channelLpJumpArgs=&clickTrackInfo=query%253Aperistaltic%252Bpump%253Bnid%253A577154781%253Bsrc%253ALazadaMainSrp%253Brn%253A93f92480f6b513b90f6079b6c83a7134%253Bregion%253Alk%253Bsku%253A577154781_LK%253Bprice%253A3248%253Bclient%253Adesktop%253Bsupplier_id%253A1000263392208%253Bsession_id%253A%253Bbiz_source%253Ah5_external%253Bslot%253A1%253Butlog_bucket_id%253A470687%253Basc_category_id%253A10000514%253Bitem_id%253A577154781%253Bsku_id%253A2688515323%253Bshop_id%253A332338%253BtemplateInfo%253A&freeshipping=0&fs_ab=1&fuse_fs=&lang=en&location=Overseas&price=3248&priceCompare=skuId%3A2688515323%3Bsource%3Alazada-search-voucher%3Bsn%3A93f92480f6b513b90f6079b6c83a7134%3BoriginPrice%3A324800%3BdisplayPrice%3A324800%3BsinglePromotionId%3A-1%3BsingleToolCode%3AmockedSalePrice%3BvoucherPricePlugin%3A0%3Btimestamp%3A1780067547170&qSellingPoint=p--peristaltic%20pump&ratingscore=5.0&request_id=93f92480f6b513b90f6079b6c83a7134&review=1&sale=1&search=1&source=search&spm=a2a0e.searchlist.list.1&stock=1}{Daraz.lk} &
+$\sim$LKR 3,500 &
+DC 12V and a power of about 8W. Operate at a measured voltage of 5-12V.&
+\badgegreen{Best} \\
 \hline
-220V 1000\,L/h submersible pump &
-\href{https://www.duino.lk/product/220v-25w-1000l-h-1-8m-submersible-water-pump-for-fish-tank-fountains-hydroponics-ponds-aquariums/}{duino.lk} &
-$\sim$LKR 1,800 &
-1000\,L/h flow rate — far exceeds dosing requirement for 750\,mL dispensing tanks &
-\badgered{Flow rate too high} \\
+
+Small Peristaltic Dosing Pump Micro Self-priming Mute Liquid Water Pump BPT Tubing for Lab 12V DC Pump &
+\href{https://www.daraz.lk/products/dc-12v-24v-small-peristaltic-dosing-pump-micro-self-priming-mute-liquid-water-pump-bpt-tubing-for-lab-12v-dc-pump-i242682768-s1474912751.html?c=&channelLpJumpArgs=&clickTrackInfo=query%253Aperistaltic%252Bpump%253Bnid%253A242682768%253Bsrc%253ALazadaMainSrp%253Brn%253A93f92480f6b513b90f6079b6c83a7134%253Bregion%253Alk%253Bsku%253A242682768_LK%253Bprice%253A4184%253Bclient%253Adesktop%253Bsupplier_id%253A1000193840551%253Bsession_id%253A%253Bbiz_source%253Ah5_external%253Bslot%253A2%253Butlog_bucket_id%253A470687%253Basc_category_id%253A10001074%253Bitem_id%253A242682768%253Bsku_id%253A1474912751%253Bshop_id%253A242605%253BtemplateInfo%253A&configId=choice_LK_promotion&freeshipping=0&fs_ab=1&fuse_fs=&lang=en&location=Overseas&price=4184&priceCompare=skuId%3A1474912751%3Bsource%3Alazada-search-voucher%3Bsn%3A93f92480f6b513b90f6079b6c83a7134%3BoriginPrice%3A418400%3BdisplayPrice%3A418400%3BsinglePromotionId%3A400000000001000%3BsingleToolCode%3ApromPrice%3BvoucherPricePlugin%3A0%3Btimestamp%3A1780067547170&qSellingPoint=p--peristaltic%20pump&ratingscore=1.0&request_id=93f92480f6b513b90f6079b6c83a7134&review=1&sale=32&search=1&source=search&spm=a211g0.searchlist.list.2&stock=1&upItemIds=242682768}{Daraz.lk} &
+$\sim$LKR 5,000 &
+DC 12V - 24V Peristaltic Liquid Micro Pump Micro Self-priming Hose Pump Head for Aquarium Lab Analytical Plate Type &
+\badgeamber{High Cost} \\
+\hline
+Peristaltic Pump Large Ball Bearing Liquid Dosing Pumps with Silicone Tube &
+\href{https://www.duino.lk/product/220v-25w-1000l-h-1-8m-submersible-water-pump-for-fish-tank-fountains-hydroponics-ponds-aquariums/}{Daraz.lk} &
+$\sim$LKR 11,800 &
+The ball bearing is in the wheel frame, which has low noise and low friction during operation, can extend the service life.&
+\badgeamber{High Cost} \\
 \hline
 \end{tabular}
 \caption{Chemical Dosing Pump Comparison}
 \end{table}
 
 \noindent\textbf{Justification:} The peristaltic dosing pump is the architecturally correct choice for this application. In a peristaltic design, the pumped fluid travels entirely inside a replaceable tube, meaning the IPA never contacts the pump motor, housing, or impeller assembly. This eliminates chemical compatibility concerns entirely. PWM speed control is also more linear for peristaltic pumps than centrifugal designs, improving dosing accuracy.
+As the cost varies we can choose the 8W 12V peri-
+staltic pump for the best choice.
+% ---------------------------------------------------------
+\newpage
+\subsection{Master Controller and Slave Controllers}
 
+To coordinate the real-time processing demands of the hydrostatic level tracking, high-frequency pulse integration, and automated dosing interlocks, a distributed microcontroller network is implemented. Here this system is implemented through a can bus, we need to assign each master and Slaves to the CAN bus system.
+
+\vspace{0.3cm}
+\noindent\textbf{Comparative Analysis:}
+
+\begin{table}[H]
+\centering
+\setlength{\tabcolsep}{5pt}
+\renewcommand{\arraystretch}{1.4}
+\begin{tabular}{|p{3.2cm}|p{3.5cm}|p{2.2cm}|p{3.5cm}|p{2cm}|}
+\hline
+\rowcolor{headerblue}
+\textcolor{white}{\textbf{Product}} &
+\textcolor{white}{\textbf{Supplier}} &
+\textcolor{white}{\textbf{Est. Cost}} &
+\textcolor{white}{\textbf{Key Specifications}} &
+\textcolor{white}{\textbf{Verdict}} \\
+\hline
+\rowcolor{chosen}
+ESP32 Development Board (38-Pin) &
+\href{https://www.duino.lk/product/esp32-development-board-38-pin/}{Duino.lk} &
+$\sim$LKR 1,490 &
+32-bit dual-core processor, integrated Wi-Fi and Bluetooth, 38 GPIO pins, native hardware interrupts. &
+\badgegreen{Best} \\
+\hline
+Arduino Uno R3 V2 Development Board &
+\href{https://www.duino.lk/product/uno-r3v2-development-board-mega328p-16u2/}{Duino.lk} &
+$\sim$LKR 1,390 &
+8-bit ATmega328P processor, 14 digital I/O pins, only 2 external hardware interrupt pins. &
+\badgeamber{Low Perf.} \\
+\hline
+Raspberry Pi 3 Model B+ &
+\href{https://tronic.lk/product/raspberry-pi-3-model-b1}{Tronic.lk} &
+$\sim$LKR 22,600 &
+1.4GHz 64-bit quad-core ARM processor, 1GB LPDDR2 SDRAM, Linux operating system. &
+\badgeamber{High Cost} \\
+\hline
+\end{tabular}
+\caption{Microcontroller Selection Matrix}
+\end{table}
+
+\noindent\textbf{Justification:} The ESP32 Development Board is selected as the optimal choice for both the Master and Slave processing nodes. It features a high-performance 32-bit dual-core architecture and abundant hardware interrupts, which are vital for capturing high-frequency asynchronous pulse streams from the SEN-HZ21WA flow meters without data loss. 
+
+While the Arduino Uno lacks the memory and processing cores to manage the concurrent HMI calculations alongside IoT data streaming, the Raspberry Pi 3 introduces unnecessary complexity, high power consumption, and extreme procurement costs for an embedded control application. Utilizing a uniform ESP32 architecture across both nodes simplifies inter-controller I2C/UART bus programming while providing integrated Wi-Fi capabilities for native hospital telemetry streaming.
+
+% ==========================================
+\newpage
+\subsection{Human-Machine Interface - Digital Gauge Display}
+
+The continuous digital readout gauge on the dashboard requires a crisp, high-contrast display module capable of rendering dynamic text, real-time numeric variables, and volumetric capacity bar indicators under varying hospital lighting environments.
+
+\vspace{0.3cm}
+\noindent\textbf{Comparative Analysis:}
+
+\begin{table}[H]
+\centering
+\setlength{\tabcolsep}{5pt}
+\renewcommand{\arraystretch}{1.4}
+\begin{tabular}{|p{3.2cm}|p{3.5cm}|p{2.2cm}|p{3.5cm}|p{2cm}|}
+\hline
+\rowcolor{headerblue}
+\textcolor{white}{\textbf{Product}} &
+\textcolor{white}{\textbf{Supplier}} &
+\textcolor{white}{\textbf{Est. Cost}} &
+\textcolor{white}{\textbf{Key Specifications}} &
+\textcolor{white}{\textbf{Verdict}} \\
+\hline
+\rowcolor{chosen}
+1.3-Inch I2C OLED Display Module &
+\href{https://www.duino.lk/product/1-3-inches-i2c-oled-display-iic-interface-display/}{Duino.lk} &
+$\sim$LKR 800 &
+$128\times64$ resolution, SH1106 driver, I2C communication interface, high-contrast emission. &
+\badgegreen{Best} \\
+\hline
+0.91-Inch I2C OLED Display Module &
+\href{https://www.duino.lk/product/0-91-inch-oled-display-module-white-blue/}{Duino.lk} &
+$\sim$LKR 800 &
+$128\times32$ resolution, SSD1306 driver, compact long form-factor, 4-pin I2C hookup. &
+\badgeamber{Too Small} \\
+\hline
+2.42-Inch 128x64 OLED Display Module &
+\href{https://www.duino.lk/product/2-42-inch-128x64-oled-display-ssd1309/}{Duino.lk} &
+$\sim$LKR 10, 000 &
+$128\times64$ resolution, SSD1309 driver, larger physical viewing space, SPI/I2C selectable. &
+\badgeamber{High Cost} \\
+\hline
+\end{tabular}
+\caption{Digital Gauge Display Comparison}
+\end{table}
+
+\noindent\textbf{Justification:} The 1.3-Inch I2C OLED display is selected as the ideal interface component. Its self-illuminating pixels ensure complete readability from sharp viewing angles without requiring an active backlight, which is critical for quick operator inspections. 
+
+The 0.91-inch alternative is rejected because its limited $128\times32$ resolution cannot fit simultaneous textual logs for both water level meters and chemical capacity tracking. Conversely, the 2.42-inch screen offers an optimal larger viewing area but commands an overly steep budget premium. The 1.3-inch variant balances economic feasibility with sufficient screen real estate to project progress bars representing total volumetric parameters.
+
+% ==========================================
+\newpage
+\subsection{Audio-Visual Emergency Alarm Subsystem}
+
+To guarantee facility protection against system abnormalities-such as chemical container exhaustion, unaligned flow deviations, or sensor failures-the system integrates a physical audio-visual signaling device.
+
+\vspace{0.3cm}
+\noindent\textbf{Comparative Analysis:}
+
+\begin{table}[H]
+\centering
+\setlength{\tabcolsep}{5pt}
+\renewcommand{\arraystretch}{1.4}
+\begin{tabular}{|p{3.2cm}|p{3.5cm}|p{2.2cm}|p{3.5cm}|p{2cm}|}
+\hline
+\rowcolor{headerblue}
+\textcolor{white}{\textbf{Product}} &
+\textcolor{white}{\textbf{Supplier}} &
+\textcolor{white}{\textbf{Est. Cost}} &
+\textcolor{white}{\textbf{Key Specifications}} &
+\textcolor{white}{\textbf{Verdict}} \\
+\hline
+
+Mini Motor Alarm Siren MS-190 &
+\href{https://www.duino.lk/product/mimi-motor-alarm-siren-ms-190-220v/}{Duino.lk} &
+$\sim$LKR 2,400 &
+AC 220V operation, high-speed physical motor siren mechanism, extreme high decibel output. &
+\badgeamber{High Cost} \\
+\hline
+\rowcolor{chosen}
+12V DC Electronic Buzzer with Warning Light &
+\href{https://www.duino.lk/product/12dc-electronic-buzzer-with-warning-light/}{Duino.lk} &
+$\sim$LKR 990 &
+DC 12V operation, unified structural piezo element with integrated red flashing LED bulb. &
+\badgegreen{Best} \\
+\hline
+Security DC 12V Loud Alarm Siren Horn &
+\href{https://www.daraz.lk/products/security-dc-12v-outdoor-alarm-siren-wire-loud-alarm-horn-115db-exterior-sirena-alarma-speaker-for-alarm-system-15w-i245753951-s1497497382.html}{Daraz.lk} &
+$\sim$LKR 3,200 &
+DC 12V input, 15W horn drive, 115dB output scale, designed for wide outdoor perimeters. &
+\badgeamber{High Cost} \\
+\hline
+\end{tabular}
+\caption{Alarm Subsystem Component Matrix}
+\end{table}
+
+\noindent\textbf{Justification:} The 12V DC Electronic Buzzer with integrated Warning Light is chosen as the ideal alert element. Because it runs directly on a 12V DC rail, it can be driven safely by the controller using a low-cost logic-level transistor switch, matching the voltage profile of the system's solenoid valves and pumps. 
+
+The MS-190 motor siren is rejected because its 220V AC input introduces severe electromagnetic noise and hazardous high-voltage integration into a fluid-filled instrumentation cabinet. Furthermore, the 115dB outdoor horn is dismissed as its acoustic volume is structurally excessive for an indoor hospital utility room. The selected 12V piezo buzzer provides clear, local audio-visual feedback to operators while remaining highly economical.
 % ---------------------------------------------------------
 \subsection{Summary Cost Comparison}
 
@@ -615,34 +776,950 @@ Table~\ref{tab:cost_summary} consolidates the recommended products and their est
 \centering
 \setlength{\tabcolsep}{6pt}
 \renewcommand{\arraystretch}{1.4}
-\begin{tabular}{|p{4cm}|p{4.5cm}|p{2cm}|p{2.5cm}|}
+\begin{tabular}{|p{4cm}|p{4.5cm}|p{2cm}|p{1.5cm}|p{2cm}|}
 \hline
 \rowcolor{headerblue}
 \textcolor{white}{\textbf{Subsystem}} &
 \textcolor{white}{\textbf{Selected Product}} &
 \textcolor{white}{\textbf{Unit Cost (LKR)}} &
-\textcolor{white}{\textbf{Qty (min.)}} \\
+\textcolor{white}{\textbf{Qty}} &
+\textcolor{white}{\textbf{Line Total (LKR)}} \\
 \hline
 \rowcolor{rowgray}
-Water level — flow sensor & SEN-HZ21WA (HT30) & $\sim$3,000 & 2 \\
+Water level -- flow sensor & SEN-HZ21WA (HT30) & $\sim$3,000 & 2 & $\sim$6,000 \\
 \hline
-Chemical level — load cell & 50\,kg body load cell & $\sim$1,800 & 1 \\
-\hline
-\rowcolor{rowgray}
-Dispensing tank sensor & JSN-SR04T ultrasonic & $\sim$950 & $n$ tanks \\
-\hline
-Chemical line flow meter & YF-S201C G\textonehalf{} & $\sim$700 & 1 \\
+Hydrostatic level sensing & 0--0.5\,MPa Pressure Sensor G1/4 & $\sim$6,990 & 1 & $\sim$6,990 \\
 \hline
 \rowcolor{rowgray}
-Control valve (per tank) & FPD270A solenoid & $\sim$900 & $n$ tanks \\
+Chemical level -- load cell & 50\,kg body load cell & $\sim$260 & 1 & $\sim$260 \\
 \hline
-Dosing pump & Peristaltic pump & $\sim$2,800 & 1 \\
+Dispensing tank sensor & JSN-SR04T ultrasonic & $\sim$1,690 & 10 & $\sim$16,900 \\
+\hline
+\rowcolor{rowgray}
+Chemical line flow meter & YF-S201C G\textonehalf{} & $\sim$1,600 & 1 & $\sim$1,600 \\
+\hline
+Control valve (per tank) & FPD270A solenoid & $\sim$1,200 & 10 & $\sim$12,000 \\
+\hline
+\rowcolor{rowgray}
+Dosing pump & 8W 12V peristaltic pump & $\sim$3,500 & 1 & $\sim$3,500 \\
+\hline
+Master controller & ESP32 Development Board (38-Pin) & $\sim$1,490 & 1 & $\sim$1,490 \\
+\hline
+\rowcolor{rowgray}
+Slave controllers & ESP32 Development Board (38-Pin) & $\sim$1,490 & 10 & $\sim$14,900 \\
+\hline
+\rowcolor{headerblue}
+\multicolumn{4}{|l|}{\textcolor{white}{\textbf{Total Estimated Hardware Cost}}} &
+\textcolor{white}{\textbf{$\sim$63,640}} \\
 \hline
 \end{tabular}
 \caption{Recommended Component Cost Summary}
 \label{tab:cost_summary}
 \end{table}
 
-\noindent The minimum fixed hardware cost (excluding dispensing-tank-count-dependent components) is approximately \textbf{LKR 14,300}. Each additional dispensing tank requires one JSN-SR04T sensor ($\sim$LKR 950) and one FPD270A solenoid valve ($\sim$LKR 900), totalling \textbf{LKR 1,850 per tank}.
+\noindent The total estimated hardware cost for the complete system (master controller, 10 slave controllers, and all associated sensors, valves, and pumps for 10 dispensing tanks) is approximately \textbf{LKR 63,640}.
 
+\newpage
+\section{Component Failures and Automated Fail-Safes}
+
+The overall system can be categorised into four localized subsystems:
+
+\begin{enumerate}
+    \item Water Supply Subsystem --- Hydrostatic Pressure Level Sensor Failure
+    \item Water Supply Subsystem --- Inline Flow Meter Failure
+    \item Chemical Dosing Subsystem --- Load Cell and Weight Platform Failure
+    \item Chemical Dosing Subsystem --- Actuator Failure (Pump \& Solenoid Valves)
+\end{enumerate}
+
+By partitioning the system into localized subsystems, the central controller can isolate functional tasks and execute targeted fault-detection routines. If a critical failure occurs within one boundary, the controller can shut down that specific subsystem or safely swap to a computational backup loop without forcing a blind, immediate crash of the entire plant.
+
+% ---------------------------------------------------------
+\subsection{Water Supply Subsystem: Hydrostatic Pressure Level Sensor Failure}
+
+The pressure transducer mounted at the base of the 2,000-liter water tank is critical for preventing dry-running or catastrophic overflows.
+
+\subsubsection*{Potential Failure Modes}
+
+\begin{enumerate}
+    \item Mineral buildup or bio-film accumulation blocks the sensor orifice, causing the diaphragm to freeze or misread (sensor drift).
+    \item Broken signal wires or terminal corrosion leading to full signal loss ($0\text{ V}$) or maximum saturation voltage ($5\text{ V}$).
+\end{enumerate}
+
+\subsubsection*{Automated Detection Strategy}
+
+\textbf{Out-of-Bounds (OOB) Windowing:} \\ Since the calibrated output range of the sensor is strictly $0.5\text{ V}$ (Empty) to $4.5\text{ V}$ (Full), any reading outside this window indicates hardware failure.
+
+\vspace{0.3cm}
+\noindent\textbf{Software Implementation:}
+
+\begin{lstlisting}[language=C++]
+if (voltage < 0.4 || voltage > 4.6) {
+    triggerAlarm("CRITICAL:Water_Pressure_Transducer_Hardware_Fault_Detected!");
+}
+\end{lstlisting}
+
+
+\subsubsection*{Fail-Safe Deployments}
+
+\begin{itemize}
+    \item \textbf{Redundant High-Level Overflow Float Switch:} \\ A secondary, completely independent mechanical float switch is placed at the absolute top threshold ($10.16\text{ m}$) of the tank. If the pressure sensor falsely reports a low water level due to a clog, the rising water mechanically trips this float switch, creating a hard electrical override that cuts power to the inlet supply valve immediately.
+
+    \item \textbf{Timeout Interlocks:} \\ If the inlet valve remains open continuously for longer than a calculated maximum duration (e.g., 45 minutes) without the pressure sensor registering an increase in water level, the controller shuts the valve down under an assumed ``Sensor Frozen / Pipe Burst'' error flag.
+\end{itemize}
+
+% ---------------------------------------------------------
+\subsection{Water Supply Subsystem: Inline Flow Meter Failure}
+
+When running the algorithmic flow integration routine, a mechanical or electronic failure in the flow meters can blind the system to the true volume parameters.
+
+\subsubsection*{Potential Failure Modes}
+
+\begin{enumerate}
+    \item \textbf{Turbine Rotor Jamming:} \\ Particulate debris from the main water line jams the internal nylon impeller, causing the sensor to output zero pulses despite fluid actively passing through.
+    \item \textbf{Hall-Effect Sensor Degradation:} \\ Internal semiconductor degradation due to temperature or manufacturing flaws, resulting in missing pulses or a dead signal line.
+\end{enumerate}
+
+\subsubsection*{Automated Detection Strategy}
+
+\textbf{State Cross-Examination (Valve vs.\ Sensor):} \\ The controller cross-references the commanded state of the primary inlet/discharge solenoid valves against incoming flow pulses.
+
+\vspace{0.3cm}
+\noindent\textbf{Software Implementation:} 
+\\ 
+If the input solenoid valve is commanded \texttt{HIGH} (Open) for more than 5 seconds but \texttt{inflowPulses == 0}, a rotor jam or sensor failure is flagged immediately.
+
+\begin{lstlisting}
+if (valveState == HIGH && inflowPulses == 0 && elapsed > 5000) {
+    triggerAlarm("WARNING:Flow_Meter_Rotor_Jam_or_Signal_Fault_Detected!");
+}
+\end{lstlisting}
+
+\subsubsection*{Fail-Safe Deployments}
+
+\begin{itemize}
+    \item \textbf{Mathematical Cross-Check Verification:} \\ The controller continuously compares the volume derived from the Hydrostatic Pressure Sensor ($V_{\text{pressure}}$) against the volume derived from the Flow Integration Algorithm ($V_{\text{algorithm}}$). If the absolute divergence between the two measurements exceeds $10\%$ ($200\text{ Liters}$), a diagnostic warning is triggered, and the system defaults exclusively to the pressure sensor while flagging the flow meter for maintenance:
+    \[
+    \left| V_{\text{pressure}} - V_{\text{algorithm}} \right| > 200\text{ L}
+    \quad \Rightarrow \quad \textbf{FLOW METER FAULT}
+    \]
+\end{itemize}
+
+% ---------------------------------------------------------
+\subsection{Chemical Dosing Subsystem: Load Cell and Weight Platform Failure}
+
+The load cell platform tracking the 10-liter Isopropyl Alcohol (IPA) container is the primary line of defense against running the chemical dosing sequence dry.
+
+\subsubsection*{Potential Failure Modes}
+
+\begin{enumerate}
+    \item \textbf{Mechanical Shifting / Structural Binding:} \\ The 10\,L container shifts off-center, or a surrounding structural component physically touches the platform, creating a ``force bridge'' that unloads the strain-gauge.
+    \item \textbf{HX711 Amplifier Communication Loss:} \\ Data line disconnection (SDA/SCL) between the 24-bit analog-to-digital converter module and the central microcontroller.
+\end{enumerate}
+
+\subsubsection*{Automated Detection Strategy}
+
+\begin{itemize}
+    \item \textbf{Weight Static Noise Detection:} \\ A functional load cell experiences minor micro-gram fluctuations due to nearby pump vibrations. If the load cell readings return an absolute, mathematically static value down to 4 decimal places over a prolonged period, it indicates an ADC communication lockup.
+
+    \item \textbf{Negative Mass Validation:} \\ If $M_{\text{current}} < M_{\text{tare}}$ (e.g., reading reports $-2\text{ kg}$), the software recognizes a calibration shift or structural binding error:
+    \[
+    M_{\text{current}} < M_{\text{tare}}
+    \quad \Rightarrow \quad \textbf{LOAD CELL BINDING / CALIBRATION FAULT}
+    \]
+\end{itemize}
+
+\subsubsection*{Fail-Safe Deployments}
+
+\begin{itemize}
+    \item \textbf{Flow Dilution Mirroring:} \\ The Computational Chemical Depletion Model $\left(\int Q_{\text{chem}}\,dt\right)$ serves as the immediate fail-safe engine. If the load cell hardware loop drops out or experiences a data fault, the system switches completely to the mathematical algorithm to finish the active batch cycle safely before locking down and requesting an operator inspection.
+
+    \item \textbf{E-Stop Default State:} \\ The chemical pump's motor driver is wired to a Normally Closed (NC) Relay. If the microcontroller experiences a total hardware crash, power to the relay coil drops out, physically breaking the power line to the chemical pump to prevent runaway chemical dosing.
+\end{itemize}
+
+% ---------------------------------------------------------
+\subsection{Chemical Dosing Subsystem: Actuator Failure (Pump \& Solenoid Valves)}
+
+Mechanical actuators are susceptible to physical wear over extended duty cycles in clinical environments.
+
+\subsubsection*{Potential Failure Modes}
+
+\begin{enumerate}
+    \item \textbf{Solenoid Valve Spring Fatigue (Stuck Open):} \\ The internal spring fails, keeping the valve open even when power is removed, causing unintended chemical or water siphon leakage.
+    \item \textbf{Peristaltic Pump Tubing Rupture:} \\ The silicone tubing cracks under prolonged mechanical stress, resulting in internal chemical leakage, a drop in output pressure, and a total loss of dosing capacity.
+\end{enumerate}
+
+\subsubsection*{Automated Detection Strategy}
+
+\begin{itemize}
+    \item \textbf{Unintended Flow Accumulation Logging:} 
+    \\ If all system pumps are commanded \texttt{LOW} (Off) and all valves are shut, but the SEN-HZ21WA micro-flow meter continues to register pulses, the controller instantly identifies a ``Stuck Open Valve'' or a ``Siphon Leak'':
+    \[
+    \text{pumpState} = \texttt{LOW},\quad \text{valveState} = \texttt{CLOSED},\quad \text{pulses} > 0
+    \quad \Rightarrow \quad \textbf{STUCK VALVE or LEAK}
+    \]
+\end{itemize}
+
+\subsubsection*{Fail-Safe Deployments}
+
+\begin{itemize}
+    \item \textbf{Dual-Gate Isolation (Series Plumbed):} \\ To eliminate a single point of failure causing chemical contamination, the dosing sequence utilises a secondary safety valve plumbed in series immediately downstream of the main control valve, as illustrated in Figure~\ref{fig:dual_valve}.
+
+    Both valves must receive a \texttt{HIGH} command from separate microcontroller GPIO pins to allow fluid to pass. If Valve~1 becomes physically stuck open, Valve~2 acts as a redundant barrier to stop fluid flow completely when the dosing cycle ends.
+
+    \begin{figure}[H]
+        \centering
+        \includegraphics[width=0.7\textwidth]{Screenshots/image.png}
+        \caption{Dual-Gate Series Valve Isolation Architecture}
+        \label{fig:dual_valve}
+    \end{figure}
+
+    \item \textbf{Physical Containment Basin (Bund Wall):} \\The 10-liter IPA container and pump assembly sit inside a localized, sealed secondary containment plastic tray. If a tube ruptures, the volatile Isopropyl Alcohol is captured safely within the basin rather than leaking onto the facility floor, eliminating structural pooling and fire hazards.
+\end{itemize}
+
+
+\newpage
+\section{Distributed Data Acquisition and Network Communication Protocol}
+
+To establish a robust data highway between the localized dispensing tank sub-controllers (Slave nodes) and the central system hub (Master controller), a resilient communication infrastructure is mandatory. Given the critical nature of hospital utility environments, the network must maintain zero-loss data frames over extended physical distribution distances while operating reliability and electromagnetic interference (EMI).
+
+The communication architecture of this system is partitioned into two clearly defined layers:
+
+\begin{enumerate}
+    \item \textbf{Local Control Layer (Slave $\rightarrow$ Master):} Real-time, deterministic wired communication between all distributed dispensing tank slave nodes and the central master controller via a CAN Bus backbone.
+    \item \textbf{Cloud Reporting Layer (Master $\rightarrow$ Cloud):} Periodic upstream telemetry from the master controller to a cloud analytics platform via Wi-Fi, enabling hospital management to access consumption reports, refill histories, and system health dashboards remotely.
+\end{enumerate}
+
+\vspace{0.3cm}
+\noindent\textbf{Comparative Analysis of Local Network Protocols:}
+
+\begin{table}[H]
+\centering
+\setlength{\tabcolsep}{5pt}
+\renewcommand{\arraystretch}{1.4}
+\begin{tabular}{|p{3.2cm}|p{3.5cm}|p{2.2cm}|p{3.5cm}|p{2cm}|}
+\hline
+\rowcolor{headerblue}
+\textcolor{white}{\textbf{Methodology}} &
+\textcolor{white}{\textbf{Physical Layer}} &
+\textcolor{white}{\textbf{Topology}} &
+\textcolor{white}{\textbf{Key Technical Attributes}} &
+\textcolor{white}{\textbf{Verdict}} \\
+\hline
+\rowcolor{chosen}
+Controller Area Network (CAN Bus) &
+Twisted-pair copper wiring (Differential signaling) &
+Multi-Drop Bus (Linear) &
+High EMI noise immunity; hardware-level error checking and auto-retransmission; max bus distance up to 1\,km; deterministic message prioritization via arbitration ID &
+\badgegreen{Selected} \\
+\hline
+MQTT over Wi-Fi &
+Wireless IEEE 802.11 (Wi-Fi) / TCP-IP &
+Broker-Client &
+Lightweight IP protocol; publish-subscribe model; high software abstraction; entirely dependent on RF signal path integrity &
+\badgered{Rejected} \\
+\hline
+\end{tabular}
+\caption{Local Control Layer Communication Protocol Evaluation}
+\end{table}
+
+% ---------------------------------------------------------
+\subsection{Alternative 1: Wireless MQTT Client-Broker Architecture (Rejected)}
+
+The MQTT protocol was rigorously evaluated as a wireless framework for streaming localized telemetry parameters; such as flow pulse counts, load cell mass readings, and dispensing tank trigger states back to the central ESP32 master core. While MQTT offers clean data serialization and straightforward horizontal scalability for adding additional nodes, its dependence on a $2.4\text{ GHz}$ or $5\text{ GHz}$ Wi-Fi radio frequency (RF) infrastructure introduces unacceptable vulnerabilities in a clinical utility setting.
+
+Hospitals feature dense structural compositions, including heavy reinforced concrete load-bearing walls, lead-shielded radiology units, and continuous acoustic paneling, which collectively induce severe RF signal attenuation, and standing wave interfering. Furthermore, if the hospital cannot make sure the wifi connection over the all the places in the hospital premises, this will lead huge connectivity issues with slave to master.
+\\Because no wireless protocol can guarantee the bounded latency and zero-loss frame delivery required for real-time safety-critical control loops in a hospital environment, MQTT is rejected for the local control layer.
+
+% ---------------------------------------------------------
+\subsection{Alternative 2: Controller Area Network (CAN Bus) - Selected}
+
+The Controller Area Network (CAN Bus) protocol is selected as the primary network architecture for the local control plant. Originally engineered for automotive powertrain and heavy industrial control systems where deterministic, fault-tolerant communication is non-negotiable, CAN Bus is architecturally aligned with the requirements of this deployment.
+
+\subsubsection*{Physical Layer: Differential Signaling}
+
+CAN Bus transmits data as the voltage difference across two conductors: \textbf{CAN\_H} (CAN High) and \textbf{CAN\_L} (CAN Low). Under a dominant (logic 0) bit, CAN\_H is driven to $+3.5\text{ V}$ while CAN\_L is pulled to $+1.5\text{ V}$, producing a differential of $+2\text{ V}$. Under a recessive (logic 1) bit, both lines float to $+2.5\text{ V}$, collapsing the differential to $0\text{ V}$.
+
+Any external electromagnetic noise radiated by hospital pumps, compressors, or sterilization units strikes both conductor lines simultaneously and with equal magnitude. Because the receiver amplifier measures only the differential voltage and not the absolute line potential, the common-mode noise component cancels entirely — preserving signal integrity regardless of the ambient electromagnetic environment.
+
+\subsubsection*{Bus Topology and Node Architecture}
+
+All ESP32 slave nodes and the ESP32 master node are connected in a linear multi-drop bus configuration using a single twisted-pair cable terminated at both physical ends with $120\,\Omega$ resistors to suppress reflective standing waves. Each node interfaces to the physical CAN bus via a dedicated \textbf{MCP2515 SPI CAN Controller} paired with a \textbf{TJA1050 CAN Bus Transceiver}, providing hardware-level message buffering and automatic error frame retransmission independent of the application firmware.
+ \begin{figure}[H]
+        \centering
+        \includegraphics[width=0.7\textwidth]{image.png}
+        \caption{CAN BUS Architecture}
+        \label{fig:dual_valve}
+    \end{figure}
+
+
+\begin{table}[H]
+\centering
+\setlength{\tabcolsep}{5pt}
+\renewcommand{\arraystretch}{1.4}
+\begin{tabular}{|p{4cm}|p{9.5cm}|}
+\hline
+\rowcolor{headerblue}
+\textcolor{white}{\textbf{CAN Bus Parameter}} &
+\textcolor{white}{\textbf{Value / Description}} \\
+\hline
+Physical Medium & Twisted-pair copper cable (shielded recommended in hospital EMI zones) \\
+\hline
+\rowcolor{rowgray}
+Signaling Method & Differential voltage (CAN\_H and CAN\_L) \\
+\hline
+Maximum Bus Length & Up to 1\,km at 50\,kbps; up to 40\,m at 1\,Mbps \\
+\hline
+\rowcolor{rowgray}
+Deployed Baud Rate & 500\,kbps (suitable for hospital corridor runs up to $\sim$100\,m) \\
+\hline
+Maximum Nodes & 110 nodes per bus segment \\
+\hline
+\rowcolor{rowgray}
+Error Detection & CRC check, ACK verification, bit stuffing, frame check, bus monitoring \\
+\hline
+Arbitration & Non-destructive bitwise ID arbitration (lower ID = higher priority) \\
+\hline
+\rowcolor{rowgray}
+Hardware Interface & MCP2515 SPI CAN Controller + TJA1050 Transceiver per node \\
+\hline
+Bus Termination & $120\,\Omega$ resistors at both physical ends of the bus \\
+\hline
+\end{tabular}
+\caption{CAN Bus Deployment Parameters}
+\end{table}
+
+\subsubsection*{Message Prioritization and Frame Structure}
+
+Each slave node is assigned a unique CAN arbitration identifier (ID). Lower numeric IDs carry higher transmission priority, allowing the master to configure the dosing request queue directly in hardware.
+
+\begin{itemize}
+    \item \texttt{ID 0x001} --- Emergency chemical leak alarm (highest priority)
+    \item \texttt{ID 0x010} --- Dispensing tank low-level refill request
+    \item \texttt{ID 0x020} --- Periodic flow meter pulse count telemetry
+    \item \texttt{ID 0x030} --- Load cell mass reading telemetry
+    \item \texttt{ID 0x0FF} --- Heartbeat / node health ping (lowest priority)
+\end{itemize}
+
+If two slave nodes simultaneously assert a refill request, the node with the lower arbitration ID wins the bus non-destructively, and the higher-ID node automatically defers and retransmits after the current frame completes implementing the first-request-first-serve queue natively at the hardware layer without any software scheduling overhead.
+
+% ---------------------------------------------------------
+\subsection{Cloud Reporting Layer: Master Node Wi-Fi Uplink}
+
+While CAN Bus governs all latency-critical, safety-essential communication within the local control plant, the ESP32 master controller independently leverages its onboard \textbf{IEEE 802.11 b/g/n Wi-Fi radio} to maintain a non-blocking upstream channel to a cloud analytics platform. This dual-interface architecture isolates real-time control traffic from reporting traffic entirely a failure in the hospital's Wi-Fi infrastructure has zero impact on local CAN Bus dosing operations.
+
+\subsubsection*{Data Collected and Transmitted}
+
+The master controller aggregates the following telemetry streams from all slave nodes over the CAN bus and periodically forwards structured JSON payloads to the cloud endpoint:
+
+\begin{table}[H]
+\centering
+\setlength{\tabcolsep}{5pt}
+\renewcommand{\arraystretch}{1.4}
+\begin{tabular}{|p{4.5cm}|p{4.5cm}|p{4.5cm}|}
+\hline
+\rowcolor{headerblue}
+\textcolor{white}{\textbf{Data Stream}} &
+\textcolor{white}{\textbf{Source}} &
+\textcolor{white}{\textbf{Report Generated}} \\
+\hline
+Volume dispensed per cycle & Slave node (flow meter) & Chemical usage by dispensing tank location \\
+\hline
+\rowcolor{rowgray}
+Refill request timestamps & Slave node (level sensor) & Frequency of refilling per tank per day/week \\
+\hline
+Cumulative IPA consumed & Master (load cell integration) & Daily and weekly chemical consumption totals \\
+\hline
+\rowcolor{rowgray}
+Tank refill queue log & Master (CAN arbitration log) & First-serve queue audit trail \\
+\hline
+Fault event log & Master (alarm subsystem) & System health and fault frequency report \\
+\hline
+\rowcolor{rowgray}
+Water supply tank level & Master (pressure transducer) & Water inventory trend and low-level alerts \\
+\hline
+\end{tabular}
+\caption{Cloud Telemetry Data Streams and Generated Reports}
+\end{table}
+
+\subsubsection*{Communication Architecture}
+
+The master node publishes aggregated telemetry to a cloud MQTT broker (A hospital-hosted MQTT server) using the \textbf{MQTT over TLS/SSL} protocol. Payloads are structured as lightweight JSON objects and published on a configurable interval (every 120 seconds for live telemetry, daily for summary reports). Hospital management and maintenance personnel access the data through a cloud dashboard to monitor:
+
+\begin{itemize}
+    \item \textbf{Chemical usage by dispensing tank location} : identifying high-consumption zones across the hospital floor plan.
+    \item \textbf{Daily and cumulative chemical consumption} : enabling procurement planning and early supply replenishment requests.
+    \item \textbf{Frequency of refilling per tank} : detecting abnormal refill rates that may indicate a leaking dispensing tank or a malfunctioning level sensor.
+    \item \textbf{System fault history} : providing a maintenance audit trail for regulatory compliance in a clinical environment.
+\end{itemize}
+
+\section{System Architecture}
+The following Architectural diagram depicts how the system works.
+
+ \begin{figure}[H]
+        \centering
+        \includegraphics[width=0.99\textwidth]{Blank diagram (2).png}
+        \caption{System Architecture Diagram}
+        \label{fig:dual_valve}
+    \end{figure}
+\newpage
+\section{Block Diagram}
+ \begin{figure}[H]
+        \centering
+        \includegraphics[width=0.8\textwidth]{Blank diagram - Page 2.png}
+        \caption{System Block Diagram}
+        \label{fig:dual_valve}
+\end{figure}
+
+\section{Operational Algorithm for IOT components}
+
+As discussed in Section 4, the overall system is composed of four primary subsystems. For ease of understanding and visualization of the complete system operation, the operational algorithms and flowcharts associated with each subsystem are presented in the following sections.
+
+\subsubsection*{Master Controller}
+ \begin{figure}[H]
+        \centering
+        \includegraphics[width=0.6\textwidth]{Flowchart01.png}
+        \caption{Operation Flow chart of master controller}
+        \label{fig:dual_valve}
+\end{figure}
+\subsubsection*{Slave controller}
+ \begin{figure}[H]
+        \centering
+        \includegraphics[width=0.3\textwidth]{IOTProj - flowchart02.png}
+        \caption{Operation Flow chart of Slave controller}
+        \label{fig:dual_valve}
+\end{figure}
+
+\subsubsection*{Chemical dosing subsystem}
+ \begin{figure}[H]
+        \centering
+        \includegraphics[width=0.3\textwidth]{IOTProj - 03.png}
+        \caption{Operation Flow chart of Chemical dosing subsystem}
+        \label{fig:dual_valve}
+\end{figure}
+
+\subsubsection*{Water level sensing + fault detection}
+ \begin{figure}[H]
+        \centering
+        \includegraphics[width=0.6\textwidth]{IOTProj - 4.png}
+        \caption{Operation Flow chart of Water level sensing + fault detection}
+        \label{fig:dual_valve}
+\end{figure}
+\section{Implement simulate the solution (with one dispensing tank)}
+\begin{figure}[H]
+        \centering
+        \includegraphics[width=0.9\textwidth]{Screenshot from 2026-05-30 14-39-10.png}
+        \caption{\href{https://wokwi.com/projects/465429948166284289}{Simulation}.}
+        \label{fig:dual_valve}
+\end{figure}
+
+\subsection{Documeneted Code}
+\begin{lstlisting}[
+    language=c++,
+    inputencoding=utf8,
+    breaklines=true,
+    breakatwhitespace=false,
+    frame=single,
+    basicstyle=\ttfamily\footnotesize
+]
+// ============================================================
+//  Automated Chemical Dosing System — Single Tank Simulation
+//  Mudaliarachchi NS — 230415H
+//  CS3243 IoT Devices and Applications
+//
+//  POT1 (GPIO34) — simulates 0–0.5 MPa pressure transducer
+//  POT2 (GPIO35) — simulates JSN-SR04T dispensing tank sensor
+//  POT3 (GPIO32) — simulates 50 kg load cell (HX711)
+//  GPIO26        — LED: solenoid valve indicator
+//  GPIO27        — Buzzer: alarm
+//
+//  MQTT topics published:
+//    dosing/tank/location        — tank ID and location string
+//    dosing/tank/refill_event    — each refill: volume + timestamp
+//    dosing/tank/daily_usage     — cumulative daily IPA consumed (L)
+//    dosing/tank/refill_freq     — total refill count this session
+//    dosing/tank/status          — water H, V, P + alarm state
+// ============================================================
+
+#include <SPI.h>
+#include <Wire.h>
+#include <Adafruit_GFX.h>
+#include <Adafruit_SSD1306.h>
+#include <WiFi.h>
+#include <PubSubClient.h>
+
+//OLED
+#define SCREEN_WIDTH 128
+#define SCREEN_HEIGHT 64
+#define OLED_RESET -1
+Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
+
+// Wi-Fi credentials 
+// Use wokwi in build 
+const char* WIFI_SSID     = "Wokwi-GUEST";
+const char* WIFI_PASSWORD = "";
+
+//Mosquitto MQTT broker
+const char* MQTT_BROKER   = "broker.hivemq.com";
+const int   MQTT_PORT     = 1883;
+const char* MQTT_CLIENT_ID = "dosing_tank_01";
+
+//Tank identity
+const char* TANK_ID       = "TANK-01";
+const char* TANK_LOCATION = "Ward-B, Corridor-2, Hospital-North";
+
+//MQTT topics
+const char* TOPIC_LOCATION   = "dosing/tank/location";
+const char* TOPIC_REFILL_EVT = "dosing/tank/refill_event";
+const char* TOPIC_DAILY      = "dosing/tank/daily_usage";
+const char* TOPIC_FREQ       = "dosing/tank/refill_freq";
+const char* TOPIC_STATUS     = "dosing/tank/status";
+
+
+const int PIN_POT_WATER = 34;
+const int PIN_POT_DISP  = 35;
+const int PIN_POT_CHEM  = 32;
+const int PIN_LED_VALVE = 26;
+const int PIN_BUZZER    = 27;
+
+// configurations  
+const float TANK_HEIGHT_MAX = 10.16f;
+const float TANK_RADIUS     = 0.25f;
+const float RHO_WATER       = 1000.0f;
+const float G               = 9.81f;
+const float TANK_AREA       = 3.14159f * TANK_RADIUS * TANK_RADIUS;
+
+const float IPA_DENSITY     = 0.785f;
+const float CHEM_MAX_MASS   = 7.85f;
+const float CHEM_TARE       = 0.425f;
+const float CHEM_LOW_WARN   = 1.0f;
+
+const float WATER_LOW_WARN  = 200.0f;
+const float DISP_LOW_THRESH = 0.20f;
+const float DISP_REFILL_VOL = 0.5f;
+
+// State variables
+bool  valveOpen    = false;
+bool  alarmActive  = false;
+float dispVolume   = 0.75f;
+
+unsigned long refillStart   = 0;
+bool          refilling     = false;
+
+// Reporting variables
+float         dailyChemUsed  = 0.0f;   // L consumed today
+int           refillCount    = 0;       // total refills this session
+unsigned long lastMqttReport = 0;       // last status publish (ms)
+const unsigned long MQTT_STATUS_INTERVAL = 10000; // publish status every 10 s
+
+// MQTT + Wi-Fi clients
+WiFiClient   wifiClient;
+PubSubClient mqttClient(wifiClient);
+
+// helper funcs 
+float readPot(int pin) {
+  return (float)analogRead(pin) / 4095.0f;
+}
+
+float computeWaterHeight(float f)   { return f * TANK_HEIGHT_MAX; }
+float computeWaterVolume(float H)   { return H * TANK_AREA * 1000.0f; }
+float computeHydrostaticPressure(float H) { return RHO_WATER * G * H; }
+
+float computeChemVolume(float f) {
+  float M = f * (CHEM_MAX_MASS + CHEM_TARE) - CHEM_TARE;
+  if (M < 0.0f) M = 0.0f;
+  return M / IPA_DENSITY;
+}
+
+bool checkSensorFault(int pin) {
+  int r = analogRead(pin);
+  return (r == 0 || r == 4095);
+}
+
+// 
+// OLED display
+void updateOLED(float waterH, float waterV, float waterPMPa) {
+  float pct = (waterH / TANK_HEIGHT_MAX) * 100.0f;
+
+  display.clearDisplay();
+  display.setTextSize(1);
+  display.setTextColor(SSD1306_WHITE);
+
+  // Title
+  display.setCursor(0, 0);
+  display.println("Water Supply Tank");
+  display.drawLine(0, 9, 127, 9, SSD1306_WHITE);
+
+  // Numeric readings
+  display.setCursor(0, 14);
+  display.print("Height : ");
+  display.print(waterH, 2);
+  display.println(" m");
+
+  display.setCursor(0, 25);
+  display.print("Volume : ");
+  display.print(waterV, 0);
+  display.println(" L");
+
+  display.setCursor(0, 36);
+  display.print("Press  : ");
+  display.print(waterPMPa, 4);
+  display.println(" MPa");
+
+  // Capacity percentage label
+  display.setCursor(0, 47);
+  display.print("Level  : ");
+  display.print(pct, 1);
+  display.println(" %");
+
+  
+  int barWidth = (int)((pct / 100.0f) * 124.0f);
+  display.drawRect(2, 56, 124, 8, SSD1306_WHITE);      
+  display.fillRect(2, 56, barWidth, 8, SSD1306_WHITE);
+
+  display.display();
+}
+
+// Alarm
+void triggerAlarm(const char* reason) {
+  if (!alarmActive) {
+    alarmActive = true;
+    Serial.print("!! ALARM: ");
+    Serial.println(reason);
+  }
+  digitalWrite(PIN_BUZZER, HIGH);
+  digitalWrite(PIN_LED_VALVE, HIGH);
+}
+
+void openValve() {
+  valveOpen = true;
+  digitalWrite(PIN_LED_VALVE, HIGH);
+  Serial.println(">> Valve OPEN — dosing");
+}
+
+void closeValve() {
+  valveOpen = false;
+  if (!alarmActive) digitalWrite(PIN_LED_VALVE, LOW);
+  Serial.println(">> Valve CLOSED — done");
+}
+
+// Wi-Fi connect 
+void connectWiFi() {
+  Serial.print("Connecting WiFi");
+  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+  int tries = 0;
+  while (WiFi.status() != WL_CONNECTED && tries < 20) {
+    delay(500);
+    Serial.print(".");
+    tries++;
+  }
+  if (WiFi.status() == WL_CONNECTED) {
+    Serial.println(" connected");
+    Serial.print("IP: ");
+    Serial.println(WiFi.localIP());
+  } else {
+    Serial.println(" FAILED — running offline");
+  }
+}
+
+//MQTT reconnect
+void mqttReconnect() {
+  if (WiFi.status() != WL_CONNECTED) return;
+  int tries = 0;
+  while (!mqttClient.connected() && tries < 3) {
+    Serial.print("MQTT connect...");
+    if (mqttClient.connect(MQTT_CLIENT_ID)) {
+      Serial.println(" OK");
+      // Publish tank identity on connection
+      char loc[128];
+      snprintf(loc, sizeof(loc),
+               "{\"tank_id\":\"%s\",\"location\":\"%s\"}",
+               TANK_ID, TANK_LOCATION);
+      mqttClient.publish(TOPIC_LOCATION, loc, true); // retained
+    } else {
+      Serial.print(" failed rc=");
+      Serial.println(mqttClient.state());
+      delay(2000);
+    }
+    tries++;
+  }
+}
+
+//Publish refill
+void publishRefillEvent(float volumeL) {
+  if (!mqttClient.connected()) return;
+  char payload[200];
+  snprintf(payload, sizeof(payload),
+           "{"
+           "\"tank_id\":\"%s\","
+           "\"location\":\"%s\","
+           "\"volume_dispensed_L\":%.3f,"
+           "\"total_refills_session\":%d,"
+           "\"daily_chem_used_L\":%.3f,"
+           "\"uptime_ms\":%lu"
+           "}",
+           TANK_ID,
+           TANK_LOCATION,
+           volumeL,
+           refillCount,
+           dailyChemUsed,
+           millis());
+  mqttClient.publish(TOPIC_REFILL_EVT, payload);
+  Serial.println("MQTT >> refill_event published");
+}
+
+//Publish periodic status
+void publishStatus(float waterH, float waterV, float waterPMPa,
+                   float chemV, float dispMl, bool alarm) {
+  if (!mqttClient.connected()) return;
+  char payload[300];
+  snprintf(payload, sizeof(payload),
+           "{"
+           "\"tank_id\":\"%s\","
+           "\"location\":\"%s\","
+           "\"water_height_m\":%.3f,"
+           "\"water_volume_L\":%.1f,"
+           "\"water_pressure_MPa\":%.4f,"
+           "\"chem_remaining_L\":%.3f,"
+           "\"disp_tank_mL\":%.0f,"
+           "\"valve_open\":%s,"
+           "\"alarm_active\":%s,"
+           "\"refill_count\":%d,"
+           "\"daily_chem_used_L\":%.3f"
+           "}",
+           TANK_ID,
+           TANK_LOCATION,
+           waterH, waterV, waterPMPa,
+           chemV, dispMl,
+           valveOpen   ? "true" : "false",
+           alarm       ? "true" : "false",
+           refillCount,
+           dailyChemUsed);
+  mqttClient.publish(TOPIC_STATUS, payload);
+}
+
+//Publish daily usage summary
+void publishDailyUsage() {
+  if (!mqttClient.connected()) return;
+  char payload[150];
+  snprintf(payload, sizeof(payload),
+           "{"
+           "\"tank_id\":\"%s\","
+           "\"location\":\"%s\","
+           "\"daily_chem_used_L\":%.3f,"
+           "\"refill_frequency_per_session\":%d"
+           "}",
+           TANK_ID,
+           TANK_LOCATION,
+           dailyChemUsed,
+           refillCount);
+  mqttClient.publish(TOPIC_DAILY, payload, true); // retained
+  mqttClient.publish(TOPIC_FREQ,  payload, true);
+  Serial.println("MQTT >> daily_usage + refill_freq published");
+}
+
+// Setup
+void setup() {
+  Serial.begin(115200);
+
+  if (!display.begin(SSD1306_SWITCHCAPVCC, 0x3C)) {
+    Serial.println("SSD1306 failed");
+    while (true);
+  }
+  display.clearDisplay();
+  display.display();
+
+  pinMode(PIN_LED_VALVE, OUTPUT);
+  pinMode(PIN_BUZZER,    OUTPUT);
+  digitalWrite(PIN_LED_VALVE, LOW);
+  digitalWrite(PIN_BUZZER,    LOW);
+
+  analogReadResolution(12);
+  analogSetAttenuation(ADC_11db);
+
+  connectWiFi();
+
+  mqttClient.setServer(MQTT_BROKER, MQTT_PORT);
+  mqttClient.setBufferSize(512); // ensure large JSON payloads fit
+  mqttReconnect();
+
+  Serial.println("==============================================");
+  Serial.println(" Automated Chemical Dosing System — Sim v1.1");
+  Serial.println(" Mudaliarachchi NS  230415H  CS3243");
+  Serial.println("==============================================");
+  delay(1000);
+}
+
+// Main loop
+void loop() {
+  unsigned long now = millis();
+  alarmActive = false;
+
+  // Keep MQTT alive
+  if (!mqttClient.connected()) mqttReconnect();
+  mqttClient.loop();
+
+  
+  float pot1 = readPot(PIN_POT_WATER);
+  float pot2 = readPot(PIN_POT_DISP);
+  float pot3 = readPot(PIN_POT_CHEM);
+
+  
+  float waterH    = computeWaterHeight(pot1);
+  float waterV    = computeWaterVolume(waterH);
+  float waterP    = computeHydrostaticPressure(waterH);
+  float waterPMPa = waterP / 1000000.0f;
+
+  bool waterFault = checkSensorFault(PIN_POT_WATER);
+  if (waterFault)               triggerAlarm("Pressure transducer OOB fault");
+  if (waterV < WATER_LOW_WARN && !waterFault)
+                                triggerAlarm("Water supply LOW — below 200 L");
+
+  
+  float chemV    = computeChemVolume(pot3);
+  bool chemFault = checkSensorFault(PIN_POT_CHEM);
+  if (chemFault)                triggerAlarm("Load cell communication fault");
+  if (chemV < CHEM_LOW_WARN && !chemFault)
+                                triggerAlarm("Chemical supply LOW — below 1 L");
+
+  
+  dispVolume     = pot2 * 0.75f;
+  float dispMl   = dispVolume * 1000.0f;
+  bool  dispLow  = (pot2 < DISP_LOW_THRESH);
+
+  if (dispLow && !refilling && !alarmActive) {
+    refilling   = true;
+    refillStart = now;
+    refillCount++;
+    dailyChemUsed += DISP_REFILL_VOL;
+    openValve();
+    publishRefillEvent(DISP_REFILL_VOL);
+  }
+
+  if (refilling && (now - refillStart >= 5000)) {
+    closeValve();
+    refilling = false;
+    Serial.print(">> Refill complete — dispensed ");
+    Serial.print(DISP_REFILL_VOL, 3);
+    Serial.println(" L");
+    publishDailyUsage();
+  }
+
+  
+  if (!alarmActive) {
+    digitalWrite(PIN_LED_VALVE, valveOpen ? HIGH : LOW);
+    digitalWrite(PIN_BUZZER, LOW);
+  }
+
+
+    updateOLED(waterH, waterV, waterPMPa);
+
+
+  
+  if (now - lastMqttReport >= MQTT_STATUS_INTERVAL) {
+    publishStatus(waterH, waterV, waterPMPa, chemV, dispMl, alarmActive);
+    lastMqttReport = now;
+  }
+
+  Serial.println("----------------------------------------------");
+  Serial.print("Water   H="); Serial.print(waterH,3);
+  Serial.print("m  V=");      Serial.print(waterV,1);
+  Serial.print("L  P=");      Serial.print(waterPMPa,4);
+  Serial.println(" MPa");
+  Serial.print("Chem    ");   Serial.print(chemV,3);
+  Serial.println(" L remaining");
+  Serial.print("Disp    ");   Serial.print(dispMl,0);
+  Serial.print(" mL  ");
+  Serial.println(dispLow ? "LOW" : "OK");
+  Serial.print("Refills ");   Serial.print(refillCount);
+  Serial.print("  Daily ");   Serial.print(dailyChemUsed,3);
+  Serial.println(" L");
+  Serial.print("Valve=");     Serial.print(valveOpen?"OPEN":"CLOSED");
+  Serial.print("  Alarm=");   Serial.println(alarmActive?"ACTIVE":"clear");
+  Serial.println();
+
+  delay(1000);
+}
+\end{lstlisting}
+\subsection*{Note : Simulation Constraints and Sensor Substitution Rationale}
+The Wokwi browser-based embedded simulation platform provides a curated hardware library oriented primarily toward common hobbyist and educational components. While it faithfully models the ESP32 microcontroller's peripheral subsystems - including the 12-bit ADC, GPIO interrupts, I2C bus, PWM channels, and Wi-Fi stack — several of the specialised industrial sensors specified in the actual system design are absent from the Wokwi component library.
+\begin{table}[H]
+\centering
+\renewcommand{\arraystretch}{1.4}
+\setlength{\tabcolsep}{5pt}
+\begin{tabular}{|p{3.8cm}|p{3.2cm}|p{1.2cm}|p{5.2cm}|}
+\hline
+\rowcolor{headerblue}
+\textcolor{white}{\textbf{Real Sensor}} &
+\textcolor{white}{\textbf{Wokwi Substitute}} &
+\textcolor{white}{\textbf{GPIO}} &
+\textcolor{white}{\textbf{Functional Gap}} \\
+\hline
+0--0.5\,MPa pressure transducer &
+Potentiometer (POT1) &
+34 &
+No voltage dead-band; OOB fault only partially testable \\
+\hline
+\rowcolor{rowgray}
+JSN-SR04T ultrasonic (dispensing tank) &
+Potentiometer (POT2) &
+35 &
+Analog poll instead of digital interrupt \\
+\hline
+HX711 + 50\,kg load cell &
+Potentiometer (POT3) &
+32 &
+12-bit vs 24-bit resolution; no real-time depletion tracking \\
+\hline
+\rowcolor{rowgray}
+SEN-HZ21WA flow sensors $\times$2 &
+Not simulated &
+--- &
+Leak detection layer entirely absent \\
+\hline
+Active buzzer &
+\texttt{wokwi-buzzer} &
+27 &
+Fully simulated \\
+\hline
+\rowcolor{rowgray}
+Red LED (valve indicator) &
+\texttt{wokwi-led} &
+26 &
+Fully simulated \\
+\hline
+SSD1306 OLED display &
+\texttt{wokwi-ssd1306} &
+I2C &
+Fully simulated \\
+\hline
+\rowcolor{rowgray}
+ESP32 microcontroller &
+\texttt{wokwi-esp32-devkit-v1} &
+--- &
+Fully simulated including Wi-Fi and MQTT \\
+\hline
+\end{tabular}
+\caption{Wokwi Sensor Substitution Summary}
+\label{tab:wokwi_sensors}
+\end{table}
+
+\section{Schematic Diagram}
+ \begin{figure}[H]
+        \centering
+        \includegraphics[width=0.99\textwidth]{Schematic_IOT-Project_2026-05-30.png}
+        \caption{Schematic Diagram With CAN Bus}
+        \label{fig:dual_valve}
+    \end{figure}
+
+\newpage
+\section*{References}
+\addcontentsline{toc}{section}{References}
+
+\begin{enumerate}
+    \item \textit{ESP32 CAN Bus Tutorial with MCP2515}. YouTube. Available at: \href{https://www.youtube.com/watch?v=JZSCzRT9TTo&t=3s}{Click Here} [Accessed: May 2026].
+
+    \item DFRobot. \textit{Gravity: Non-contact Liquid Level Sensor Tutorial}. DFRobot Wiki. Available at: \href{https://wiki.dfrobot.com/tutorial/20147/}{Click Here}[Accessed: May 2026].
+
+    \item WonderfulPCB. \textit{Comparing Popular Sensor Brands: Prices, Value and Features}. WonderfulPCB Blog. Available at: \href{https://www.wonderfulpcb.com/blog/comparing-popular-sensor-brands-prices-value-features/}{Click Here}[Accessed: May 2026].
+\end{enumerate}
 \end{document}
